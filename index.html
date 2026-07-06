@@ -17,12 +17,16 @@
 
 <body style='margin : 0px; overflow: hidden; font-family: Monospace;'>
 
-<!-- 
-  Based on Lee Stemkoski's hello-cube.html and smoothed-controls.html: https://github.com/stemkoski
+<!--
+  Based on Lee Stemkoski's hello-cube.html and smoothed-controls.html:
+  https://github.com/stemkoski/AR-Examples
+  
   Changes from hello-cube.html:
-    1. mesh1 built as a heart Group instead of a cube (unchanged from last patch)
-    2. smoothedControls wraps markerRoot1 to remove jitter (lifted directly from smoothed-controls.html)
-    3. touchstart/touchmove/touchend listeners rotate mesh1 locally (new)
+    1. mesh1 = heart Group (spheres + cylinders) instead of a cube
+    2. smoothedControls wraps markerRoot1 to remove jitter (from smoothed-controls.html)
+    3. touchstart/touchmove/touchend listeners rotate mesh1 locally
+    4. fullscreen canvas (not 640x480) for stable phone tracking
+    5. mesh1.rotation.x = -Math.PI/2 so the aorta points UP from the marker
   Everything else is untouched.
 -->
 
@@ -32,7 +36,7 @@ var scene, camera, renderer, clock, deltaTime, totalTime;
 
 var arToolkitSource, arToolkitContext, smoothedControls;
 
-var markerRoot1, markerRoot2;
+var markerRoot1;
 
 var mesh1;
 
@@ -54,11 +58,11 @@ function initialize()
 		alpha: true
 	});
 	renderer.setClearColor(new THREE.Color('lightgrey'), 0)
-	renderer.setSize( 640, 480 );
+	renderer.setSize( window.innerWidth, window.innerHeight );
 	renderer.domElement.style.position = 'absolute'
 	renderer.domElement.style.top = '0px'
 	renderer.domElement.style.left = '0px'
-	// prevent the browser from scrolling/zooming the page while dragging on the canvas
+	// prevent the browser from scrolling/zooming while dragging on the canvas
 	renderer.domElement.style.touchAction = 'none'
 	document.body.appendChild( renderer.domElement );
 
@@ -121,15 +125,16 @@ function initialize()
 
 	// interpolates from last position to create smoother transitions when moving.
 	// parameter lerp values near 0 are slow, near 1 are fast (instantaneous).
+	// Using 0.2/0.15 — smooth enough to kill jitter, snappy enough to not lag.
 	let smoothedRoot = new THREE.Group();
 	scene.add(smoothedRoot);
 	smoothedControls = new THREEx.ArSmoothedControls(smoothedRoot, {
-		lerpPosition: 0.4,
-		lerpQuaternion: 0.3,
+		lerpPosition: 0.2,
+		lerpQuaternion: 0.15,
 		lerpScale: 1,
 	});
 
-	// ---- heart group (unchanged from previous patch) ----
+	// ---- heart group ----
 	let material1	= new THREE.MeshNormalMaterial({
 		transparent: true,
 		opacity: 0.5,
@@ -162,6 +167,9 @@ function initialize()
 	mesh1.add(aorta);
 
 	mesh1.position.y = 0.5;
+	// Stand the heart upright — rotate so the Y axis (aorta) points
+	// away from the marker surface toward the viewer (up from table).
+	mesh1.rotation.x = -Math.PI / 2;
 	// ---- end heart group ----
 
 	// mesh1 is parented to smoothedRoot (not markerRoot1 directly) so it gets
@@ -176,7 +184,7 @@ function initialize()
 	let isDragging = false;
 	let previousTouchX = 0;
 	let previousTouchY = 0;
-	let rotateSpeed = 0.01;
+	let rotateSpeed = 0.015;
 
 	renderer.domElement.addEventListener('touchstart', function(event){
 		isDragging = true;

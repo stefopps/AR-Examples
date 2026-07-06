@@ -12,21 +12,25 @@
 	<script src="threex/threex-artoolkitcontext.js"></script>
 	<script src="threex/threex-arbasecontrols.js"></script>
 	<script src="threex/threex-armarkercontrols.js"></script>
+	<script src="threex/threex-arsmoothedcontrols.js"></script>
 </head>
 
 <body style='margin : 0px; overflow: hidden; font-family: Monospace;'>
 
 <!-- 
-  Based on Lee Stemkoski's hello-cube.html: https://github.com/stemkoski
-  Only the mesh1 construction block has been changed (cube -> heart group).
-  Everything else is byte-for-byte identical to the original.
+  Based on Lee Stemkoski's hello-cube.html and smoothed-controls.html: https://github.com/stemkoski
+  Changes from hello-cube.html:
+    1. mesh1 built as a heart Group instead of a cube (unchanged from last patch)
+    2. smoothedControls wraps markerRoot1 to remove jitter (lifted directly from smoothed-controls.html)
+    3. touchstart/touchmove/touchend listeners rotate mesh1 locally (new)
+  Everything else is untouched.
 -->
 
 <script>
 
 var scene, camera, renderer, clock, deltaTime, totalTime;
 
-var arToolkitSource, arToolkitContext;
+var arToolkitSource, arToolkitContext, smoothedControls;
 
 var markerRoot1, markerRoot2;
 
@@ -54,6 +58,8 @@ function initialize()
 	renderer.domElement.style.position = 'absolute'
 	renderer.domElement.style.top = '0px'
 	renderer.domElement.style.left = '0px'
+	// prevent the browser from scrolling/zooming the page while dragging on the canvas
+	renderer.domElement.style.touchAction = 'none'
 	document.body.appendChild( renderer.domElement );
 
 	clock = new THREE.Clock();
@@ -113,7 +119,17 @@ function initialize()
 		type: 'pattern', patternUrl: "data/hiro.patt",
 	})
 
-	// ---- ONLY CHANGED BLOCK: cube geometry swapped for a heart group ----
+	// interpolates from last position to create smoother transitions when moving.
+	// parameter lerp values near 0 are slow, near 1 are fast (instantaneous).
+	let smoothedRoot = new THREE.Group();
+	scene.add(smoothedRoot);
+	smoothedControls = new THREEx.ArSmoothedControls(smoothedRoot, {
+		lerpPosition: 0.4,
+		lerpQuaternion: 0.3,
+		lerpScale: 1,
+	});
+
+	// ---- heart group (unchanged from previous patch) ----
 	let material1	= new THREE.MeshNormalMaterial({
 		transparent: true,
 		opacity: 0.5,
@@ -146,9 +162,42 @@ function initialize()
 	mesh1.add(aorta);
 
 	mesh1.position.y = 0.5;
-	// ---- END CHANGED BLOCK ----
+	// ---- end heart group ----
 
-	markerRoot1.add( mesh1 );
+	// mesh1 is parented to smoothedRoot (not markerRoot1 directly) so it gets
+	// the jitter-free tracked transform. markerRoot1 itself is only read by
+	// smoothedControls.update() below, never rendered directly.
+	smoothedRoot.add( mesh1 );
+
+	////////////////////////////////////////////////////////////
+	// touch-to-rotate: drag on the canvas spins the heart locally,
+	// independent of and on top of the marker tracking
+	////////////////////////////////////////////////////////////
+	let isDragging = false;
+	let previousTouchX = 0;
+	let previousTouchY = 0;
+	let rotateSpeed = 0.01;
+
+	renderer.domElement.addEventListener('touchstart', function(event){
+		isDragging = true;
+		previousTouchX = event.touches[0].clientX;
+		previousTouchY = event.touches[0].clientY;
+	});
+
+	renderer.domElement.addEventListener('touchmove', function(event){
+		event.preventDefault();
+		if (!isDragging) return;
+		let deltaX = event.touches[0].clientX - previousTouchX;
+		let deltaY = event.touches[0].clientY - previousTouchY;
+		mesh1.rotation.y += deltaX * rotateSpeed;
+		mesh1.rotation.x += deltaY * rotateSpeed;
+		previousTouchX = event.touches[0].clientX;
+		previousTouchY = event.touches[0].clientY;
+	}, { passive: false });
+
+	renderer.domElement.addEventListener('touchend', function(event){
+		isDragging = false;
+	});
 }
 
 
@@ -157,6 +206,9 @@ function update()
 	// update artoolkit on every frame
 	if ( arToolkitSource.ready !== false )
 		arToolkitContext.update( arToolkitSource.domElement );
+
+	// additional code for smoothed controls
+	smoothedControls.update(markerRoot1);
 }
 
 

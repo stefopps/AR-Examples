@@ -4,6 +4,8 @@
 	<title>Hello, AR Heart!</title>
 	<!-- include three.js library -->
 	<script src='js/three.js'></script>
+	<!-- include OBJLoader for the heart model -->
+	<script src="js/OBJLoader.js"></script>
 	<!-- include jsartookit -->
 	<script src="jsartoolkit5/artoolkit.min.js"></script>
 	<script src="jsartoolkit5/artoolkit.api.js"></script>
@@ -22,11 +24,13 @@
   https://github.com/stemkoski/AR-Examples
   
   Changes from hello-cube.html:
-    1. mesh1 = heart Group (spheres + cylinders) instead of a cube
+    1. mesh1 = real 3D heart model (25k faces) loaded via OBJLoader instead of a cube
     2. smoothedControls wraps markerRoot1 to remove jitter (from smoothed-controls.html)
     3. touchstart/touchmove/touchend listeners rotate mesh1 locally
     4. fullscreen canvas (not 640x480) for stable phone tracking
     5. mesh1.rotation.x = -Math.PI/2 so the aorta points UP from the marker
+    6. MeshPhongMaterial with directional light for anatomical shading
+    7. Heart model: CardioARInsights GLTF parts → combined + decimated OBJ
   Everything else is untouched.
 -->
 
@@ -49,6 +53,10 @@ function initialize()
 
 	let ambientLight = new THREE.AmbientLight( 0xcccccc, 0.5 );
 	scene.add( ambientLight );
+
+	let directionalLight = new THREE.DirectionalLight( 0xffffff, 0.6 );
+	directionalLight.position.set(0, 1, 1);
+	scene.add(directionalLight);
 				
 	camera = new THREE.Camera();
 	scene.add(camera);
@@ -134,48 +142,40 @@ function initialize()
 		lerpScale: 1,
 	});
 
-	// ---- heart group ----
-	let material1	= new THREE.MeshNormalMaterial({
+	// ---- load real 3D heart model ----
+	// Heart material: anatomical reddish with some translucency
+	var heartMaterial = new THREE.MeshPhongMaterial({
+		color: 0xcc3333,
+		specular: 0x440000,
+		shininess: 30,
 		transparent: true,
-		opacity: 0.5,
+		opacity: 0.85,
 		side: THREE.DoubleSide
 	});
 
-	mesh1 = new THREE.Group();
-
-	let ventricleGeo = new THREE.SphereGeometry(0.4, 16, 16);
-	let leftVentricle = new THREE.Mesh(ventricleGeo, material1);
-	leftVentricle.position.set(-0.25, -0.2, 0);
-	mesh1.add(leftVentricle);
-
-	let rightVentricle = new THREE.Mesh(ventricleGeo, material1);
-	rightVentricle.position.set(0.25, -0.2, 0);
-	mesh1.add(rightVentricle);
-
-	let atriumGeo = new THREE.SphereGeometry(0.3, 16, 16);
-	let leftAtrium = new THREE.Mesh(atriumGeo, material1);
-	leftAtrium.position.set(-0.3, 0.35, 0.05);
-	mesh1.add(leftAtrium);
-
-	let rightAtrium = new THREE.Mesh(atriumGeo, material1);
-	rightAtrium.position.set(0.3, 0.35, -0.05);
-	mesh1.add(rightAtrium);
-
-	let aortaGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.5, 12);
-	let aorta = new THREE.Mesh(aortaGeo, material1);
-	aorta.position.set(0, 0.7, 0);
-	mesh1.add(aorta);
-
-	mesh1.position.y = 0.5;
-	// Stand the heart upright — rotate so the Y axis (aorta) points
-	// away from the marker surface toward the viewer (up from table).
-	mesh1.rotation.x = -Math.PI / 2;
-	// ---- end heart group ----
-
-	// mesh1 is parented to smoothedRoot (not markerRoot1 directly) so it gets
-	// the jitter-free tracked transform. markerRoot1 itself is only read by
-	// smoothedControls.update() below, never rendered directly.
-	smoothedRoot.add( mesh1 );
+	var loader = new THREE.OBJLoader();
+	loader.load('heart_low.obj', function(object) {
+		mesh1 = object;
+		// Center and size the heart above the marker
+		mesh1.position.y = 0.5;
+		// Stand upright — aorta points up from marker surface
+		mesh1.rotation.x = -Math.PI / 2;
+		// Scale to fit marker area (~2 units across)
+		var bbox = new THREE.Box3().setFromObject(mesh1);
+		var size = bbox.getSize();
+		var maxDim = Math.max(size.x, size.y, size.z);
+		if (maxDim > 0) {
+			var scale = 1.8 / maxDim;
+			mesh1.scale.set(scale, scale, scale);
+		}
+		// Apply material to all children
+		mesh1.traverse(function(child) {
+			if (child instanceof THREE.Mesh) child.material = heartMaterial;
+		});
+		// Parent to smoothed root AFTER load completes
+		smoothedRoot.add(mesh1);
+	});
+	// ---- end heart model ----
 
 	////////////////////////////////////////////////////////////
 	// touch-to-rotate: drag on the canvas spins the heart locally,
@@ -194,7 +194,7 @@ function initialize()
 
 	renderer.domElement.addEventListener('touchmove', function(event){
 		event.preventDefault();
-		if (!isDragging) return;
+		if (!isDragging || !mesh1) return;
 		let deltaX = event.touches[0].clientX - previousTouchX;
 		let deltaY = event.touches[0].clientY - previousTouchY;
 		mesh1.rotation.y += deltaX * rotateSpeed;

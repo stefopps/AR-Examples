@@ -156,6 +156,10 @@ function initialize()
 		side: THREE.DoubleSide
 	});
 
+	// Scale variables — composed each frame in update()
+	var modelBaseScale = 1.0; // auto-scale from bounding box (set once)
+	var pinchScale = 1.0;     // accumulated pinch-zoom delta
+
 	var loader = new THREE.OBJLoader();
 	loader.load('heart_low.obj', function(object) {
 		mesh1 = object;
@@ -168,8 +172,7 @@ function initialize()
 		var size = bbox.getSize();
 		var maxDim = Math.max(size.x, size.y, size.z);
 		if (maxDim > 0) {
-			baseScale = 1.8 / maxDim;
-			mesh1.scale.set(baseScale, baseScale, baseScale);
+			modelBaseScale = 1.8 / maxDim;
 		}
 		// Apply material to all children
 		mesh1.traverse(function(child) {
@@ -185,7 +188,6 @@ function initialize()
 	////////////////////////////////////////////////////////////
 	let state = 'idle'; // idle | rotate | pinch
 	let lastPinchDist = 0;
-	let baseScale = 1.0; // accumulated scale from all pinch gestures
 	let prevTouch1 = { x: 0, y: 0 };
 	let rotateSpeed = 0.015;
 	let zoomSpeed = 0.005;
@@ -219,11 +221,8 @@ function initialize()
 			let dy = event.touches[0].clientY - event.touches[1].clientY;
 			let newDist = Math.sqrt(dx * dx + dy * dy);
 			let delta = (newDist - lastPinchDist) * zoomSpeed;
-			baseScale += delta;
-			baseScale = Math.max(0.3, Math.min(4.0, baseScale)); // clamp zoom range
-			// Read current tracked scale from smoothedRoot to compose
-			var trackedScale = smoothedRoot.scale.x; // uniform from marker
-			mesh1.scale.set(baseScale, baseScale, baseScale);
+			pinchScale += delta;
+			pinchScale = Math.max(0.3, Math.min(4.0, pinchScale)); // clamp zoom range
 			lastPinchDist = newDist;
 		}
 	}, { passive: false });
@@ -242,6 +241,31 @@ function update()
 
 	// additional code for smoothed controls
 	smoothedControls.update(markerRoot1);
+
+	// heartbeat animation: lub-dub pulse on the heart scale
+	if (mesh1) {
+		var beatDuration = 0.833; // ~72 BPM
+		var phase = (totalTime % beatDuration) / beatDuration; // 0.0–1.0
+
+		// Two pulses per cycle: lub (0.0–0.18) and dub (0.25–0.40)
+		var pulse = 1.0;
+		var lubWidth = 0.06;
+		var dubWidth = 0.05;
+
+		// Lub: sharp peak at phase ≈ 0.09
+		var lubPhase = phase - 0.09;
+		if (Math.abs(lubPhase) < lubWidth) {
+			pulse = 1.0 + 0.08 * Math.cos((lubPhase / lubWidth) * Math.PI);
+		}
+		// Dub: smaller peak at phase ≈ 0.32
+		var dubPhase = phase - 0.32;
+		if (Math.abs(dubPhase) < dubWidth) {
+			pulse = 1.0 + 0.05 * Math.cos((dubPhase / dubWidth) * Math.PI);
+		}
+
+		var finalScale = modelBaseScale * pinchScale * pulse;
+		mesh1.scale.set(finalScale, finalScale, finalScale);
+	}
 }
 
 

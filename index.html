@@ -24,14 +24,14 @@
   https://github.com/stemkoski/AR-Examples
   
   Changes from hello-cube.html:
-    1. mesh1 = real 3D heart model (25k faces) loaded via OBJLoader instead of a cube
-    2. smoothedControls wraps markerRoot1 to remove jitter (from smoothed-controls.html)
-    3. touchstart/touchmove/touchend listeners rotate mesh1 locally
-    4. fullscreen canvas (not 640x480) for stable phone tracking
-    5. mesh1.rotation.x = -Math.PI/2 so the aorta points UP from the marker
-    6. MeshPhongMaterial with directional light for anatomical shading
-    7. Heart model: CardioARInsights GLTF parts → combined + decimated OBJ
-  Everything else is untouched.
+    1. Real 3D heart model (101k faces, OBJ) via OBJLoader
+    2. SmoothedControls wrapping markerRoot1 (lerp 0.2/0.15) to kill jitter
+    3. One-finger drag = rotate, two-finger pinch = zoom (0.3x–4.0x range)
+    4. Fullscreen canvas with retina pixel ratio (max 2x) for sharp rendering
+    5. Camera source bumped to 960×720 for better marker coverage
+    6. MeshPhongMaterial with directional + ambient light
+    7. Heart stands upright — aorta points up from marker surface
+  Everything else is untouched stemkoski scaffolding.
 -->
 
 <script>
@@ -85,6 +85,8 @@ function initialize()
 
 	arToolkitSource = new THREEx.ArToolkitSource({
 		sourceType : 'webcam',
+		sourceWidth  : 960,
+		sourceHeight : 720,
 	});
 
 	function onResize()
@@ -166,8 +168,8 @@ function initialize()
 		var size = bbox.getSize();
 		var maxDim = Math.max(size.x, size.y, size.z);
 		if (maxDim > 0) {
-			var scale = 1.8 / maxDim;
-			mesh1.scale.set(scale, scale, scale);
+			baseScale = 1.8 / maxDim;
+			mesh1.scale.set(baseScale, baseScale, baseScale);
 		}
 		// Apply material to all children
 		mesh1.traverse(function(child) {
@@ -179,33 +181,55 @@ function initialize()
 	// ---- end heart model ----
 
 	////////////////////////////////////////////////////////////
-	// touch-to-rotate: drag on the canvas spins the heart locally,
-	// independent of and on top of the marker tracking
+	// touch interaction: one finger rotates, two fingers pinch-zoom
 	////////////////////////////////////////////////////////////
-	let isDragging = false;
-	let previousTouchX = 0;
-	let previousTouchY = 0;
+	let state = 'idle'; // idle | rotate | pinch
+	let lastPinchDist = 0;
+	let baseScale = 1.0; // accumulated scale from all pinch gestures
+	let prevTouch1 = { x: 0, y: 0 };
 	let rotateSpeed = 0.015;
+	let zoomSpeed = 0.005;
 
 	renderer.domElement.addEventListener('touchstart', function(event){
-		isDragging = true;
-		previousTouchX = event.touches[0].clientX;
-		previousTouchY = event.touches[0].clientY;
+		if (event.touches.length === 1) {
+			state = 'rotate';
+			prevTouch1.x = event.touches[0].clientX;
+			prevTouch1.y = event.touches[0].clientY;
+		} else if (event.touches.length === 2) {
+			state = 'pinch';
+			let dx = event.touches[0].clientX - event.touches[1].clientX;
+			let dy = event.touches[0].clientY - event.touches[1].clientY;
+			lastPinchDist = Math.sqrt(dx * dx + dy * dy);
+		}
 	});
 
 	renderer.domElement.addEventListener('touchmove', function(event){
 		event.preventDefault();
-		if (!isDragging || !mesh1) return;
-		let deltaX = event.touches[0].clientX - previousTouchX;
-		let deltaY = event.touches[0].clientY - previousTouchY;
-		mesh1.rotation.y += deltaX * rotateSpeed;
-		mesh1.rotation.x += deltaY * rotateSpeed;
-		previousTouchX = event.touches[0].clientX;
-		previousTouchY = event.touches[0].clientY;
+		if (!mesh1) return;
+
+		if (state === 'rotate' && event.touches.length === 1) {
+			let deltaX = event.touches[0].clientX - prevTouch1.x;
+			let deltaY = event.touches[0].clientY - prevTouch1.y;
+			mesh1.rotation.y += deltaX * rotateSpeed;
+			mesh1.rotation.x += deltaY * rotateSpeed;
+			prevTouch1.x = event.touches[0].clientX;
+			prevTouch1.y = event.touches[0].clientY;
+		} else if (state === 'pinch' && event.touches.length === 2) {
+			let dx = event.touches[0].clientX - event.touches[1].clientX;
+			let dy = event.touches[0].clientY - event.touches[1].clientY;
+			let newDist = Math.sqrt(dx * dx + dy * dy);
+			let delta = (newDist - lastPinchDist) * zoomSpeed;
+			baseScale += delta;
+			baseScale = Math.max(0.3, Math.min(4.0, baseScale)); // clamp zoom range
+			// Read current tracked scale from smoothedRoot to compose
+			var trackedScale = smoothedRoot.scale.x; // uniform from marker
+			mesh1.scale.set(baseScale, baseScale, baseScale);
+			lastPinchDist = newDist;
+		}
 	}, { passive: false });
 
 	renderer.domElement.addEventListener('touchend', function(event){
-		isDragging = false;
+		state = 'idle';
 	});
 }
 

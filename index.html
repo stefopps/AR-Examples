@@ -19,63 +19,51 @@
 
 <body style='margin : 0px; overflow: hidden; font-family: Monospace;'>
 
-<!-- Tap-to-start overlay (required by iOS Safari for camera permission) -->
+<!-- Fallback overlay — only shown if camera fails to start -->
 <div id="start-overlay" style="
 	position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-	background: #0a0a14; display: flex; flex-direction: column;
+	background: #0a0a14; display: none; flex-direction: column;
 	align-items: center; justify-content: center; z-index: 9999;
 ">
-	<div style="font-size: 48px; margin-bottom: 20px;">💙</div>
-	<div id="start-text" style="
-		color: #3366cc; font-size: 22px; font-weight: bold;
-		margin-bottom: 10px; letter-spacing: 1px;
-	">AR Heart Scan</div>
-	<div id="start-sub" style="
-		color: #888; font-size: 14px; margin-bottom: 30px;
-	">Point your camera at the Hiro marker</div>
+	<div style="font-size: 48px; margin-bottom: 20px;">📷</div>
+	<div style="color: #3366cc; font-size: 20px; font-weight: bold; margin-bottom: 10px;">Camera Needed</div>
+	<div id="start-error" style="
+		color: #888; font-size: 14px; margin-bottom: 30px; max-width: 280px; text-align: center;
+	">Tap below to allow camera access</div>
 	<button id="start-btn" style="
 		padding: 16px 48px; font-size: 18px; font-weight: bold;
 		background: #3366cc; color: white; border: none;
 		border-radius: 40px; cursor: pointer; letter-spacing: 1px;
 		-webkit-appearance: none;
 	">Start Camera</button>
-	<div id="start-error" style="
-		color: #cc4444; font-size: 13px; margin-top: 24px;
-		text-align: center; max-width: 280px; display: none;
-	"></div>
 </div>
-
-<!--
-  Based on Lee Stemkoski's hello-cube.html and smoothed-controls.html:
-  https://github.com/stemkoski/AR-Examples
-  
-  Changes from hello-cube.html:
-    1. Real 3D heart model (101k faces, OBJ) via OBJLoader
-    2. SmoothedControls wrapping markerRoot1 (lerp 0.2/0.15) to kill jitter
-    3. One-finger drag = rotate, two-finger pinch = zoom (0.3x–4.0x range)
-    4. Fullscreen canvas with retina pixel ratio (max 2x) for sharp rendering
-    5. Camera source bumped to 960×720 for better marker coverage
-    6. MeshPhongMaterial with directional + ambient light
-    7. Heart stands upright — aorta points up from marker surface
-  Everything else is untouched stemkoski scaffolding.
--->
 
 <script>
 
 var scene, camera, renderer, clock, deltaTime, totalTime;
-
 var arToolkitSource, arToolkitContext, smoothedControls;
+var markerRoot1, mesh1;
+var modelBaseScale = 1.0, pinchScale = 1.0;
+var started = false;
 
-var markerRoot1;
+// Auto-start immediately (works if camera permission already granted).
+// If blocked by iOS Safari, the overlay fallback kicks in.
+initialize();
+animate();
 
-var mesh1;
-
-// -------- Don't start until user taps (iOS camera permission policy) --------
 document.getElementById('start-btn').addEventListener('click', function() {
-	initialize();
-	animate();
+	if (!started) {
+		// User tapped — retry camera init from a gesture context
+		started = true;
+		arToolkitSource.init(function onReady(){ onResize(); });
+	}
 	document.getElementById('start-overlay').style.display = 'none';
 });
+
+function showCameraOverlay() {
+	var overlay = document.getElementById('start-overlay');
+	if (overlay) overlay.style.display = 'flex';
+}
 
 function initialize()
 {
@@ -101,7 +89,6 @@ function initialize()
 	renderer.domElement.style.position = 'absolute'
 	renderer.domElement.style.top = '0px'
 	renderer.domElement.style.left = '0px'
-	// prevent the browser from scrolling/zooming while dragging on the canvas
 	renderer.domElement.style.touchAction = 'none'
 	document.body.appendChild( renderer.domElement );
 
@@ -131,25 +118,17 @@ function initialize()
 
 	arToolkitSource.init(function onReady(){
 		onResize()
-		var sub = document.getElementById('start-sub');
-		if (sub) sub.textContent = 'Camera ready — point at the Hiro marker';
+	}, function onError(err) {
+		showCameraOverlay();
 	});
 	
-	// Safety timeout: if camera still not ready after 5s, show error
+	// If camera not ready after 3s, show fallback (iOS first-visit)
 	setTimeout(function() {
 		if (!arToolkitSource.ready) {
-			var overlay = document.getElementById('start-overlay');
-			var btn = document.getElementById('start-btn');
-			var errDiv = document.getElementById('start-error');
-			overlay.style.display = 'flex';
-			btn.textContent = 'Retry Camera';
-			btn.style.display = 'inline-block';
-			errDiv.style.display = 'block';
-			errDiv.textContent = 'Camera did not start. Make sure you opened this in Safari and tapped Allow Camera.';
+			showCameraOverlay();
 		}
-	}, 5000);
+	}, 3000);
 	
-	// handle resize event
 	window.addEventListener('resize', function(){
 		onResize()
 	});
@@ -158,13 +137,11 @@ function initialize()
 	// setup arToolkitContext
 	////////////////////////////////////////////////////////////	
 
-	// create atToolkitContext
 	arToolkitContext = new THREEx.ArToolkitContext({
 		cameraParametersUrl: 'data/camera_para.dat',
 		detectionMode: 'mono'
 	});
 	
-	// copy projection matrix to camera when initialization complete
 	arToolkitContext.init( function onCompleted(){
 		camera.projectionMatrix.copy( arToolkitContext.getProjectionMatrix() );
 	});
@@ -173,16 +150,12 @@ function initialize()
 	// setup markerRoots
 	////////////////////////////////////////////////////////////
 
-	// build markerControls
 	markerRoot1 = new THREE.Group();
 	scene.add(markerRoot1);
 	let markerControls1 = new THREEx.ArMarkerControls(arToolkitContext, markerRoot1, {
 		type: 'pattern', patternUrl: "data/hiro.patt",
 	})
 
-	// interpolates from last position to create smoother transitions when moving.
-	// parameter lerp values near 0 are slow, near 1 are fast (instantaneous).
-	// Using 0.2/0.15 — smooth enough to kill jitter, snappy enough to not lag.
 	let smoothedRoot = new THREE.Group();
 	scene.add(smoothedRoot);
 	smoothedControls = new THREEx.ArSmoothedControls(smoothedRoot, {
@@ -192,7 +165,6 @@ function initialize()
 	});
 
 	// ---- load real 3D heart model ----
-	// Heart material: anatomical reddish with some translucency
 	var heartMaterial = new THREE.MeshPhongMaterial({
 		color: 0x3366cc,
 		specular: 0x224488,
@@ -202,29 +174,20 @@ function initialize()
 		side: THREE.DoubleSide
 	});
 
-	// Scale variables — composed each frame in update()
-	var modelBaseScale = 1.0; // auto-scale from bounding box (set once)
-	var pinchScale = 1.0;     // accumulated pinch-zoom delta
-
 	var loader = new THREE.OBJLoader();
 	loader.load('heart_low.obj', function(object) {
 		mesh1 = object;
-		// Center and size the heart above the marker
 		mesh1.position.y = 0.5;
-		// Stand upright — aorta points up from marker surface
 		mesh1.rotation.x = -Math.PI / 2;
-		// Scale to fit marker area (~2 units across)
 		var bbox = new THREE.Box3().setFromObject(mesh1);
 		var size = bbox.getSize();
 		var maxDim = Math.max(size.x, size.y, size.z);
 		if (maxDim > 0) {
 			modelBaseScale = 1.8 / maxDim;
 		}
-		// Apply material to all children
 		mesh1.traverse(function(child) {
 			if (child instanceof THREE.Mesh) child.material = heartMaterial;
 		});
-		// Parent to smoothed root AFTER load completes
 		smoothedRoot.add(mesh1);
 	});
 	// ---- end heart model ----
@@ -232,7 +195,7 @@ function initialize()
 	////////////////////////////////////////////////////////////
 	// touch interaction: one finger rotates, two fingers pinch-zoom
 	////////////////////////////////////////////////////////////
-	let state = 'idle'; // idle | rotate | pinch
+	let state = 'idle';
 	let lastPinchDist = 0;
 	let prevTouch1 = { x: 0, y: 0 };
 	let rotateSpeed = 0.015;
@@ -268,7 +231,7 @@ function initialize()
 			let newDist = Math.sqrt(dx * dx + dy * dy);
 			let delta = (newDist - lastPinchDist) * zoomSpeed;
 			pinchScale += delta;
-			pinchScale = Math.max(0.3, Math.min(4.0, pinchScale)); // clamp zoom range
+			pinchScale = Math.max(0.3, Math.min(4.0, pinchScale));
 			lastPinchDist = newDist;
 		}
 	}, { passive: false });
@@ -281,29 +244,24 @@ function initialize()
 
 function update()
 {
-	// update artoolkit on every frame
 	if ( arToolkitSource.ready !== false )
 		arToolkitContext.update( arToolkitSource.domElement );
 
-	// additional code for smoothed controls
 	smoothedControls.update(markerRoot1);
 
-	// heartbeat animation: lub-dub pulse on the heart scale
+	// heartbeat animation: lub-dub pulse at ~72 BPM
 	if (mesh1) {
-		var beatDuration = 0.833; // ~72 BPM
-		var phase = (totalTime % beatDuration) / beatDuration; // 0.0–1.0
+		var beatDuration = 0.833;
+		var phase = (totalTime % beatDuration) / beatDuration;
 
-		// Two pulses per cycle: lub (0.0–0.18) and dub (0.25–0.40)
 		var pulse = 1.0;
 		var lubWidth = 0.06;
 		var dubWidth = 0.05;
 
-		// Lub: sharp peak at phase ≈ 0.09
 		var lubPhase = phase - 0.09;
 		if (Math.abs(lubPhase) < lubWidth) {
 			pulse = 1.0 + 0.08 * Math.cos((lubPhase / lubWidth) * Math.PI);
 		}
-		// Dub: smaller peak at phase ≈ 0.32
 		var dubPhase = phase - 0.32;
 		if (Math.abs(dubPhase) < dubWidth) {
 			pulse = 1.0 + 0.05 * Math.cos((dubPhase / dubWidth) * Math.PI);

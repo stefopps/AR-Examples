@@ -19,6 +19,32 @@
 
 <body style='margin : 0px; overflow: hidden; font-family: Monospace;'>
 
+<!-- Tap-to-start overlay (required by iOS Safari for camera permission) -->
+<div id="start-overlay" style="
+	position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+	background: #0a0a14; display: flex; flex-direction: column;
+	align-items: center; justify-content: center; z-index: 9999;
+">
+	<div style="font-size: 48px; margin-bottom: 20px;">💙</div>
+	<div id="start-text" style="
+		color: #3366cc; font-size: 22px; font-weight: bold;
+		margin-bottom: 10px; letter-spacing: 1px;
+	">AR Heart Scan</div>
+	<div id="start-sub" style="
+		color: #888; font-size: 14px; margin-bottom: 30px;
+	">Point your camera at the Hiro marker</div>
+	<button id="start-btn" style="
+		padding: 16px 48px; font-size: 18px; font-weight: bold;
+		background: #3366cc; color: white; border: none;
+		border-radius: 40px; cursor: pointer; letter-spacing: 1px;
+		-webkit-appearance: none;
+	">Start Camera</button>
+	<div id="start-error" style="
+		color: #cc4444; font-size: 13px; margin-top: 24px;
+		text-align: center; max-width: 280px; display: none;
+	"></div>
+</div>
+
 <!--
   Based on Lee Stemkoski's hello-cube.html and smoothed-controls.html:
   https://github.com/stemkoski/AR-Examples
@@ -44,8 +70,12 @@ var markerRoot1;
 
 var mesh1;
 
-initialize();
-animate();
+// -------- Don't start until user taps (iOS camera permission policy) --------
+document.getElementById('start-btn').addEventListener('click', function() {
+	initialize();
+	animate();
+	document.getElementById('start-overlay').style.display = 'none';
+});
 
 function initialize()
 {
@@ -101,7 +131,23 @@ function initialize()
 
 	arToolkitSource.init(function onReady(){
 		onResize()
+		var sub = document.getElementById('start-sub');
+		if (sub) sub.textContent = 'Camera ready — point at the Hiro marker';
 	});
+	
+	// Safety timeout: if camera still not ready after 5s, show error
+	setTimeout(function() {
+		if (!arToolkitSource.ready) {
+			var overlay = document.getElementById('start-overlay');
+			var btn = document.getElementById('start-btn');
+			var errDiv = document.getElementById('start-error');
+			overlay.style.display = 'flex';
+			btn.textContent = 'Retry Camera';
+			btn.style.display = 'inline-block';
+			errDiv.style.display = 'block';
+			errDiv.textContent = 'Camera did not start. Make sure you opened this in Safari and tapped Allow Camera.';
+		}
+	}, 5000);
 	
 	// handle resize event
 	window.addEventListener('resize', function(){
